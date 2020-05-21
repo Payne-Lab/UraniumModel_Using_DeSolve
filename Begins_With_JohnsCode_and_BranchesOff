@@ -1,23 +1,105 @@
-setwd("~/Box Sync/Uranium MCMC/")
+library("readxl")
 
-#install.packages("deSolve")
-library(deSolve) #load the deSolve package
+#Insert file into working directory
+getwd()
+setwd("/Users/micpim/Desktop")
+Udata <- read_excel("Uranium Data R.xlsx")
 
+#Ignore missing values (NAs), round Age values, and multiply them by a 1 million 
+DajAge <- round(Udata$DAJAge[1:27],3) * (1*10^6)
+DajUfrac <-Udata$DAJUfrac[1:27]
+
+GuaAge <- round(Udata$GUAAge[1:25],3) * (1*10^6)
+GuaUfrac <- Udata$GUAUfrac[1:25]
+
+TasAge <- round(Udata$TASAge[1:28],3)* (1*10^6)
+TasUfrac<-Udata$TASUfrac[1:28]
+
+#Read in Fei Feis Data
+ZalAge <- round(Udata$ZALAge[1:83],3) * (1*10^6)
+ZalUfrac <- Udata$ZALUfrac[1:83]
+
+GarAge <- round(Udata$GARAge[1:34],3)* (1*10^6)
+GarUfrac<-Udata$GARUfrac[1:34]
+
+DawAge <- round(Udata$DAWUAge[1:27],3) * (1*10^6)
+DawUfrac <-Udata$DAWUfrac[1:27]
+
+KamAge <- round(Udata$KAMAge[1:15],3) * (1*10^6)
+KAMUfrac <- Udata$KAMUfrac[1:15]
+
+DaxAge <- round(Udata$DAXAge[1:25],3)* (1*10^6)
+DaxUfrac<-Udata$DAXUfrac[1:25]
+
+
+#Combine all Age and Ufrac values, making sure to append vectors in the same order 
+AllAges <- c(DajAge,GuaAge,TasAge)
+AllUfrac <- c(DajUfrac,GuaUfrac,TasUfrac)
+
+#Combine all Feis Feis Age and Ufrac data
+FeiAge<- c(ZalAge,GarAge,DawAge,KamAge,DaxAge)
+FeiUfrac<-c(ZalUfrac,GarUfrac,DawUfrac,KAMUfrac,DaxUfrac )
+FeiAge2<- c(FeiAge[1:83],FeiAge[91:159],FeiAge[167:184])
+FeiUfrac2<-c(FeiUfrac[1:83],FeiUfrac[91:159],FeiUfrac[167:184])
+
+#Exclude non-boundary time data 
+order <- sort(AllAges,decreasing=TRUE)    #Orders data so that we can easily see the non boundary times
+ExcludedData<-order[55:80]        #Creates a vector of the nonboundary times
+BoundaryAges<-AllAges [! AllAges %in% ExcludedData] #Exludes those times
+
+#Eclude Fei Feis non-boundary data
+FeiOrder<- sort(FeiAge, decreasing = TRUE)
+exclude_data <- FeiOrder[45:184]
+boundary_Ages<-AllAges [! FeiAge %in% exclude_data]
+
+#Remove non boundary UFrac data
+RemovedIndex<- match(ExcludedData,AllAges)  #Find the indices for every value of (x,y) x, looking insde y
+RemovedData <- AllUfrac[RemovedIndex]        #Uses indices to find values needed to be removed
+
+#Remove non boundary fei fei data
+removed_index <- match(exclude_data, FeiAge)
+removed_data <- FeiUfrac[removed_index]
+
+#Uses Removed Data to break the data into segements exluding the unwanted data, must be done this way
+#To avoid loosing repeating values, taking out the non bounday points by hand instead of using
+#The earlier match function
+
+Good <- AllUfrac[1:20]
+Good2 <-AllUfrac[28:41]
+Good3 <-AllUfrac[53:72]
+BoundaryUfrac <- c(Good,Good2,Good3)
+
+##set up data frame to store output of boundary time data from the model
+Analysis <- data.frame(matrix(nrow=length(BoundaryUfrac), ncol=7))
+names(Analysis) <- c("Min", "Max", "Deviation", "Squared Deviation","Standard Deviation", "AVG Percent Error","Standard Error")
+
+##Set up data frame to store output of entire time data, from the model
+EntireAnalysis <- data.frame(matrix(nrow=length(AllUfrac), ncol=7))
+names(Analysis) <- c("Min", "Max", "Deviation", "Squared Deviation","Standard Deviation", "AVG Percent Error","Standard Error")
+
+##Set up data frame to store output of entire fei fei time data, from the model
+EntireAnalysis <- data.frame(matrix(nrow=length(FeiAge), ncol=7))
+names(Analysis) <- c("Min", "Max", "Deviation", "Squared Deviation","Standard Deviation", "AVG Percent Error","Standard Error")
+
+
+library(deSolve)
 ## how many iterations ##
-nreps <- 50
+nreps <- 200
 
 # length of model run #
 duration <-1.8e6 #duration of model run
-dt <- 1000 #time step therefore 1800 data points for each run
+
+
+dt <- 1000 #time step
 t.anox.start <- 472000 #time of the onset of perturbation
 
 #set distributions for drawing values for parameters to be estimated
-#These are our uniform priors
 D.other <- runif(n=nreps, min = -0.05, max = 0.05) #fractionation in oxygenated environments
 D.anox <- runif(n=nreps, min = 0.2, max = 1.2) #fractionation in anoxic environments
-f.anox.b <- runif(n=nreps, min = 0.0, max = 0.01) #anoxic seafloor fraction before/after perturbation 
+f.anox.b <- runif(n=nreps, min = 0.002, max = 0.0021) #anoxic seafloor fraction before perturbation
 f.anox.p <- runif(n=nreps, min = 0.0, max = 0.3) #anoxic seafloor fraction during perturbation
 dur.p <- runif(n=nreps, min = 0, max = duration-t.anox.start) #duration of perturbation
+f.anox.a <- runif(n=nreps, min = 0.002, max = 0.051) #anoxic seafloor fraction after perturbation
 
 #values to be used in setting up the model
 t.anox.end <- t.anox.start + dur.p #time of the end of the perturbation
@@ -26,173 +108,175 @@ steps <- duration/dt #number of time steps in the model
 ##set up data frame to store output from the model
 U.ocean <- data.frame(matrix(nrow=steps+1, ncol=nreps)) #matrix of ocean uranium concentrations
 U238.ocean <- data.frame(matrix(nrow=steps+1, ncol=nreps)) #matrix of uranium isotope compositions
-params <- data.frame(matrix(nrow=nreps, ncol=5))
-names(params) <- c("D.other", "D.anox", "f.anox.b", "f.anox.p", "dur.p")
+params <- data.frame(matrix(nrow=nreps, ncol=6))
+names(params) <- c("D.other", "D.anox", "f.anox.b", "f.anox.p","dur.p", "f.anox.a")
 
-
+DU238.ocean <- data.frame(matrix(nrow=54, ncol=nreps))
+feifeiU238 <- data.frame(matrix(nrow=170, ncol=nreps))
 ##set up repetitions of model runs using for loop##
 for (i in 1:nreps) {
-print(i)
+  print(i)
+  
+  #uranium cycle model#
+  model <- function (time, y, parms) {
+    with(as.list(c(y, parms)), {
+      f.anox <- f.an(time)
+      dU = J.riv - k.anox*f.anox*y[1] - k.other*(1-f.anox)*y[1]
+      dU238 = (J.riv*(deltaU.riv - U238) - k.anox*f.anox*y[1]*D.anox[i] - k.other*(1-f.anox)*y[1]*D.other[i])/y[1]
+      list(c(dU, dU238))
+    })
+  } 
+  
+  y <- c(U = 1.96e13, #mol U (Morford and Emerson 1999)
+         U238 = -0.165) #Lau et al 2016
+  
+  parms <- c(J.riv = 0.4e8, #Lau et al 2016
+             k.anox = 1.45772594752187e-4, #Lau et al 2016, calculated
+             k.other = 1.73834440079269e-6, #Lau et al 2016, to reach steady state
+             deltaU.riv=-0.05) #Lau et al 2016, calculated steady state input to produce d238U ~ -0.165
+  
+  times <- seq(0, duration, dt)
+  
+  forceanox=c(rep(f.anox.b[i],(t.anox.start/dt+1)), rep(f.anox.p[i], #set up anoxia forcing function
+                                                        (t.anox.end[i]-t.anox.start)/dt), rep(f.anox.a[i],
+                                                                                              (duration-t.anox.end[i])/dt+1))
+  anox.event=data.frame(times,forceanox)  #put the anoxia forcing into data frame with time
+  f.an = approxfun(x=anox.event[,1],y=anox.event[,2],method="linear",rule=2) #function for calculating f.anox in model
+  
+  out <- data.frame(ode(y, times, model, parms))
+  
+  ## need to store output from the model and parameter values in a data frame
+  U.ocean[,i] <- log10(out[,2]) #put uranium concentrations from model into data frame
+  U238.ocean[,i] <- out[,3] #put uranium isotopes from model into data frame
+  
+  params[i,1] <- D.other[i] #store value for D.other, fractionation in oxic environments
+  params[i,2] <- D.anox[i] #store value for D.anox, fractionation in anoxic environments
+  params[i,3] <- f.anox.b[i] #store value for f.anox.b, background anoxia level
+  params[i,4] <- f.anox.p[i] #store value for f.anox.p, perturbation anoxia level
+  params[i,5] <- dur.p[i] #store value for dur.p, duration of perturbation
+  params[i,6] <- f.anox.a[i] #store value for f.anox.a, after anoxia level
 
-#uranium cycle model#
-model <- function (time, y, parms) {
-  with(as.list(c(y, parms)), {
-    f.anox <- f.an(time)
-    dU = J.riv - k.anox*f.anox*y[1] - k.other*(1-f.anox)*y[1]
-    dU238 = (J.riv*(deltaU.riv - U238) - k.anox*f.anox*y[1]*D.anox[i] - k.other*(1-f.anox)*y[1]*D.other[i])/y[1]
-    list(c(dU, dU238))
-  })
+  #Adjust Model times, and find index of the times at our data points
+  StratTimes <- 252300000 - times
+  CompareIndex <- match(BoundaryAges,StratTimes)
+  
+  #Adjust Model times, and find index of the times at all of our data points
+  StratTimes <- 252300000 - times
+  CompareALLIndex <- match(AllAges,StratTimes)
+  
+  #Adjust Model times, and find index of the times at all of fei fei data points
+  StratTimes <- 252300000 - times
+  CompareFEIIndex <- match(FeiAge2,StratTimes)
+  
+  #index into model output to find UFrac at the indexed times
+  ModelUfrac <- out$U238[CompareIndex]
+  
+  #index into model output to find UFrac at ALL the indexed times
+  ModelALLUfrac <- out$U238[CompareALLIndex]
+  
+  #index into model output to find UFrac at Fei fei  indexed times
+  ModelALLUffrac <- out$U238[CompareFEIIndex]
+  
+  
+  #put uranium isotopes from model into data fram but only the ones at the data times 
+  
+  DU238.ocean[,i] <- ModelUfrac  #put uranium isotopes from model into data frame
+  feifeiU238[,i] <- ModelALLUffrac  
+
+  
+  #Compare Model output to Known Data
+  
+   Analysis[i,1] <- min(abs(BoundaryUfrac - ModelUfrac))
+   Analysis[i,2] <- max(abs(BoundaryUfrac - ModelUfrac))
+   Analysis[i,3] <- mean(abs(BoundaryUfrac - ModelUfrac))
+   Analysis[i,4] <- mean(abs(BoundaryUfrac - ModelUfrac)^2)
+   Analysis[i,5] <- sd(abs(BoundaryUfrac - ModelUfrac))
+   Analysis[i,6] <- mean((abs(ModelUfrac - BoundaryUfrac)/abs(BoundaryUfrac))*100)
+   Analysis[i,7] <- sd(abs(BoundaryUfrac - ModelUfrac))/sqrt(length(BoundaryUfrac)) 
+  
 }
 
-y <- c(U = 1.96e13, #mol U (Morford and Emerson 1999)
-       U238 = -0.165) #Lau et al 2016
+#Filter runs
+PercentFilter <- Analysis[,6]
+ErrorFilter <- Analysis[,7]
+SdFilter <-Analysis[,5]
+Min <- Analysis[i,1]
+Mean <- Analysis[i,6]
+Standard <- Analysis[i,7]
 
-parms <- c(J.riv = 0.4e8, #Lau et al 2016
-           k.anox = 1.45772594752187e-4, #Lau et al 2016, calculated
-           k.other = 1.73834440079269e-6, #Lau et al 2016, to reach steady state
-           deltaU.riv=-0.05) #Lau et al 2016, calculated steady state input to produce d238U ~ -0.165
+Pfiltered <- which((PercentFilter < 100) & (ErrorFilter < 0.02) & (SdFilter < 0.14) 
+                     )  #Finds indices of runs less then 100 
+BestPercent <- data.frame(matrix(nrow= 2001, ncol=length(Pfiltered)))
+Punfiltered <- which(PercentFilter >100 )
+WorstPercent <- data.frame(matrix(nrow= 2001, ncol=length(Punfiltered)))
 
-times <- seq(0, duration, dt)
+#Store Best and Worst Runs
+BestPercent <- U238.ocean[,Pfiltered]
+BestParams <- params[Pfiltered,]
+WorstPercent <- U238.ocean[,Punfiltered]
+WorstParams <- params[Punfiltered,]
 
-forceanox=c(rep(f.anox.b[i],(t.anox.start/dt+1)), rep(f.anox.p[i], #set up anoxia forcing function
-          (t.anox.end[i]-t.anox.start)/dt), rep(f.anox.b[i], 
-          (duration-t.anox.end[i])/dt+1))
-
-anox.event=data.frame(times,forceanox)  #put the anoxia forcing into data frame with time
-f.an = approxfun(x=anox.event[,1],y=anox.event[,2],method="linear",rule=2) #function for calculating f.anox in model
-
-out <- data.frame(ode(y, times, model, parms))
-
-## need to store output from the model and parameter values in a data frame
-U.ocean[,i] <- log10(out[,2]) #put uranium concentrations from model into data frame
-U238.ocean[,i] <- out[,3] #put uranium isotopes from model into data frame
-
-params[i,1] <- D.other[i] #store value for D.other, fractionation in oxic environments
-params[i,2] <- D.anox[i] #store value for D.anox, fractionation in anoxic environments
-params[i,3] <- f.anox.b[i] #store value for f.anox.b, background anoxia level
-params[i,4] <- f.anox.p[i] #store value for f.anox.p, perturbation anoxia level
-params[i,5] <- dur.p[i] #store value for dur.p, duration of perturbation
-
+#Plots Best and Worst runs on top of observed data points
+plot(BestPercent[,1], StratTimes,xlim=c(-1.4,0.4),cex=0.5,type="l",col="black"
+     , xlab = "U238/U235", main = "Best Model Runs")
+for (i in 1 : length(BestPercent)){
+  lines(BestPercent[,i], StratTimes)
 }
+points(BoundaryUfrac,BoundaryAges,xlim=c(-1.4, .4),ylim=c(252300000,250500000),col = "red",pch = 19)
 
-#add time variable to model output for matching with data
-U.ocean$mod.age <- times
-U238.ocean$mod.age <- times
+plot(WorstPercent[,1], StratTimes,xlim=c(-1.4,0.4),cex=0.5,type="l",col="black"
+     , xlab = "U238/U235", main = "Total Model Runs")
+for (i in 1 : length(WorstPercent)){
+  lines(WorstPercent[,i], StratTimes)
+}
+points(BoundaryUfrac,BoundaryAges,xlim=c(-1.4, .4),ylim=c(252300000,250500000),col = "red",pch = 19)
 
-
-
-#The subset( ) function is the easiest way to select variables and observations. 
-#In the following example, we select all rows that have a value of age greater than 
-#or equal to 20 or age less then 10. We keep the ID and Weight columns.
-#newdata <- subset(mydata, age >= 20 | age < 10,
-                  #select=c(ID, Weight))
-
-
-
-## read in data from file ##
-u.data <- read.delim(file="lau.u.data.txt", sep="\t")
-u.data$logU <- log10(u.data$U_ppb) + 9.99 #(taking log transformation of U concentrations and then multiplying to get ocean in moles)
-u.data <- subset(u.data, Age_Mya>0) #subset to values with ages, selects all rows with Age_Mya >0
-u.data$mod.age <- 252.42e6 - 1e6*round(u.data$Age_Mya, 3) #round ages to match with model
-u.data <- subset(u.data, mod.age>0 & mod.age<duration) #make sure all samples used fall within duration of simulation
-u.data <- u.data[order(u.data$mod.age),]  # [vector, ] takes all the coloumn, but only the rows in vector and puts them in 
-
-#plot data to check for errors
-par(mfrow=c(2,1), mar=c(4,4,1,1))
-plot(u.data$U238~u.data$mod.age, las=1, xlab="age in model years",
-     ylab="d238U")
-plot(u.data$logU~u.data$mod.age, las=1, xlab="age in model years",
-     ylab="log ocean U reservoir")
-
-#extract the values for the time points of interest from the model runs
-samples <- data.frame(u.data$mod.age) #define data frame with ages of samples
-names(samples) <- c("mod.age") #name ages of datapoints to match ages in model
-samples.delta <- na.omit(data.frame(u.data$U238, u.data$mod.age)) #two coloumn vectors of times and ufracs from data
-samples.d <- data.frame(samples.delta$u.data.mod.age) #one coloumn vector of times
-names(samples.d) <- c("mod.age")
-
-first.diff.delta <- diff(samples.delta$u.data.U238, lag=1, differences=1)
-first.diff.conc <- diff(u.data$logU, lag=1, differences=1)
-sd(first.diff.delta)
-sd(first.diff.conc)
-
-#DF <- data.frame(x = c(1, 2, 3), y = c(0, 10, NA), d = c(1, 3, 7))
-#> names(DF) <- c("U238","mod.age","gal")
-#> DF
-#U238 mod.age gal
-#1    1       0   1
-#2    2      10   3
-#3    3      NA   7
-
-# dff <- na.omit(data.frame(DF$U238,DF$mod.age))
-# dff
-#DF.U238 DF.mod.age
-#1       1      0
-#2       2     10
-
-#diff() takes the next number in index and subract the previous number 
+plot(U238.ocean[,1], StratTimes,xlim=c(-1.4,0.4),cex=0.5,type="l",col="black")
+for (i in 1 : length(U238.ocean)){
+  lines(U238.ocean[,i], StratTimes)
+}
+points(BoundaryUfrac,BoundaryAges,xlim=c(-1.4, .4),ylim=c(252300000,250500000), col = "red",pch = 19)
 
 
-#merge with data files by age
-#Merge two data frames by common columns or row names, 
-#The rows in the two data frames that match on the specified columns are extracted, and joined together. 
-#If there is more than one match, all possible matches contribute one row each. 
-mod.output.d <- merge(samples.d, U238.ocean, by="mod.age", all=FALSE)
-plot(mod.output.d[,2]~mod.output.d$mod.age)
-mod.output.d <- mod.output.d[,2:(nreps+1)] #takes away time vector in coloumn 1 leving only model output
+#put all model runs with matching times in justModelUfrac dataframe 
 
-mod.output.c <- merge(samples, U.ocean, by="mod.age", all=FALSE)
-plot(mod.output.c[,2]~mod.output.c$mod.age)
-mod.output.c <- mod.output.c[,2:(nreps+1)]
+DU238.ocean$mod.age <- BoundaryAges
+DU238.ocean$realdata <- BoundaryUfrac
+ModelAndReal <- DU238.ocean[,1:(nreps)]
+ModelAndReal[,(nreps +1)] <- DU238.ocean$realdata
 
-#add noise to the values for the time points of interest from the model runs
-#NEED TO CONSIDER HOW TO DO THIS FROM DATA
-  #1. FROM MEASUREMENT ERROR ON INDIVIDUAL POINTS?
-  #2. FROM FIRST DIFFERENCES AMONG DATAPOINTS?
-noise.d <- matrix(data = rnorm(n=nrow(mod.output.d)*ncol(mod.output.d), mean=0, sd=sd(first.diff.delta))
-                , nrow = nrow(mod.output.d), ncol = ncol(mod.output.d))
+#Same But with fei fei
+feifeiU238$mod.age <- FeiAge2
+feifeiU238$realdata <- FeiUfrac2
+modelAndreal <- feifeiU238[,1:(nreps)]
+modelAndreal[,(nreps +1)] <- feifeiU238$realdata
 
-noise.c <- matrix(data = rnorm(n=nrow(mod.output.c)*ncol(mod.output.c), mean=0, sd=sd(first.diff.conc))
-                  , nrow = nrow(mod.output.c), ncol = ncol(mod.output.c))
+#FEI FEI OR KIM
+kim = ModelAndReal
+fei = modelAndreal
+run = kim
 
+#standardize
+mod.ufrac <- as.matrix(run)
+m.ufrac <- (mod.ufrac-mean(mod.ufrac))/sd(mod.ufrac)
 
-mod.dn <- mod.output.d+noise.d
-mod.cn <- mod.output.c+noise.c
-mod.dn[,(nreps+1)] <- samples.delta$u.data.U238
-mod.cn[,(nreps+1)] <- u.data$logU
+#plot(DU238.ocean$mod.age~ModelAndReal[,3], las=1)
 
-#NEED TO STANDARDIZE DATA TO MEAN ZERO AND UNIT VARIANCE PRIOR TO PCA
-z <- matrix(data=runif(n=9,min=0,max=1), nrow=3, ncol=3)
-z1 <- (z - mean(z))/sd(z)
+#TRANSPOSE?
+pca <- princomp(t(m.ufrac))
 
-mod.dn1 <- as.matrix(mod.dn)
-m.dn1 <- (mod.dn1-mean(mod.dn1))/sd(mod.dn1)
-mod.cn1 <- as.matrix(mod.cn)
-m.cn1 <- (mod.cn1-mean(mod.cn1))/sd(mod.cn1)
-
-plot(mod.dn[,1]~samples.d$mod.age, las=1)
-plot(mod.cn[,1]~samples$mod.age, las=1)
-
-#combine model output for isotopes with model output for concentrations
-mod <- rbind(m.dn1, m.cn1)
-
-
-
-#PCA of model runs, plot and color code by parameter values, examine where real data plot
-pca <- princomp(t(mod))
 PoV <- pca$sdev^2/sum(pca$sdev^2)
 
-#pdf("screeplot.pdf", h=6, w=5)
 par(mfrow=c(1,1))
 plot(100*PoV[PoV>0.01], pch=1, las=1, ylab="Percent Variance Explained",
      xlab="Principal Component")
 lines(100*PoV[PoV>0.01])
-#dev.off()
 
+#dev.off()
 zz <- as.data.frame(pca$scores[,1:6])
 
 ### APPROXIMATE BAYES COMPUTATION ###
-ref<-zz[nreps+1,]
+ref<-zz[nreps,]
 zz$distance <- apply(zz,1,function(x)sqrt(sum((x-ref)^2)))
 
 ##combine pca scores and distance with parameter values##
@@ -209,17 +293,14 @@ zz.1$Col.f.anox.b <- rbPal(100)[as.numeric(cut(zz.1$f.anox.b,breaks = 100))]
 zz.1$Col.f.anox.p <- rbPal(100)[as.numeric(cut(zz.1$f.anox.p,breaks = 100))]
 zz.1$Col.dur.p <- rbPal(100)[as.numeric(cut(zz.1$dur.p,breaks = 100))]
 zz.1$Col.distance <- rbPal(100)[as.numeric(cut(zz.1$distance, breaks = 100))]
+zz.1$Col.f.anox.a <- rbPal(100)[as.numeric(cut(zz.1$f.anox.a, breaks = 100))]
 
 cols <- list(zz.1$Col.D.other, zz.1$Col.D.anox, zz.1$Col.f.anox.b, zz.1$Col.f.anox.p, zz.1$Col.dur.p, zz.1$Col.distance)
 titles <- c("D.other", "D.anox", "f.anox.b", "f.anox.p", "dur.p", "distance")
 lim.lower <- c(min(params$D.other), min(params$D.anox), min(params$f.anox.b),
-               min(params$f.anox.p), min(params$dur.p)/100000, min(zz.1$distance))
+               min(params$f.anox.p), min(params$dur.p),min(params$f.anox.a)/100000, min(zz.1$distance))
 lim.upper <- c(max(params$D.other), max(params$D.anox), max(params$f.anox.b),
-               max(params$f.anox.p), max(params$dur.p)/100000, max(zz.1$distance))
-
-#install.packages("SDMTools")
-library(SDMTools)
-
+               max(params$f.anox.p), max(params$dur.p), max(params$f.anox.a)/100000, max(zz.1$distance))
 
 #pdf("pca.plot.pc1.pc2.pdf", h=9, w=6)
 par(mfrow=c(3,2), mar=c(4,4,1,4), oma=c(0,0,1,0), mgp=c(2,1,0), xpd=TRUE)
@@ -232,11 +313,7 @@ for (i in 1:length(cols)) {
                     max(zz.1$Comp.1+3),max(zz.1$Comp.1+1)),
                 y=c(max(zz.1$Comp.2),max(zz.1$Comp.2),
                     min(zz.1$Comp.2),min(zz.1$Comp.2)))
-  legend.gradient(pnts, rbPal(100), title="",
-        limits = c(round(lim.lower[i],2), round(lim.upper[i],2)))
 }
-#dev.off()
-
 #pdf("pca.plot.pc2.pc3.pdf", h=9, w=6)
 par(mfrow=c(3,2), mar=c(4,4,1,4), oma=c(0,0,1,0), mgp=c(2,1,0), xpd=TRUE)
 for (i in 1:length(cols)) {
@@ -248,12 +325,8 @@ for (i in 1:length(cols)) {
                     max(zz.1$Comp.2+2),max(zz.1$Comp.2+0.5)),
                 y=c(max(zz.1$Comp.3),max(zz.1$Comp.3),
                     min(zz.1$Comp.3),min(zz.1$Comp.3)))
-  legend.gradient(pnts, rbPal(100), title="",
-                  limits = c(round(lim.lower[i], 2), round(lim.upper[i],2)))
 }
 #dev.off()
-
-#pdf("pca.plot.pc1.pc3.pdf", h=9, w=6)
 par(mfrow=c(3,2), mar=c(4,4,1,4), oma=c(0,0,1,0), mgp=c(2,1,0), xpd=TRUE)
 for (i in 1:length(cols)) {
   plot(zz.1$Comp.1,zz.1$Comp.3,pch = 16,col = cols[[i]], cex=1, las=1,
@@ -264,17 +337,15 @@ for (i in 1:length(cols)) {
                     max(zz.1$Comp.1+2),max(zz.1$Comp.1+0.5)),
                 y=c(max(zz.1$Comp.3),max(zz.1$Comp.3),
                     min(zz.1$Comp.3),min(zz.1$Comp.3)))
-  legend.gradient(pnts, rbPal(100), title="",
-                  limits = c(round(lim.lower[i], 2), round(lim.upper[i],2)))
 }
-#dev.off()
-
-
 ### get parameter values via approximate bayes computation ###
 hist(zz.1$f.anox.p)
 hist(zz.1$distance)
 dist <- min(zz.1$distance)
-zz.2 <- subset(zz.1, distance<dist+3)
+  #Write line, that finds the first percentile , whats the value at first percent
+firstPercent <- quantile(zz.1$dist, c(0.01))  
+  #Subset of ZZ1 where distance is less than first percentile of dist
+zz.2 <- subset(zz.1, distance <= firstPercent)
 hist(zz.2$distance)
 plot(zz.2$Comp.1~zz.2$f.anox.p)
 hist(zz.1$f.anox.p)
@@ -284,6 +355,7 @@ d2 <- density(zz.2$f.anox.b)
 d3 <- density(zz.2$D.anox)
 d4 <- density(zz.2$D.other)
 d5 <- density(zz.2$dur.p)
+d6 <- density(zz.2$f.anox.a)
 
 #pdf("abc.parameters.density.pdf", h=8, w=6)
 par(mfrow=(c(3,2)), mar=c(3,4,1,1))
@@ -297,19 +369,24 @@ plot(d4, main="D.other", las=1)
 polygon(d4, col="red", border="black")
 plot(d5, main="dur.p", las=1)
 polygon(d5, col="red", border="black")
-#dev.off()
+plot(d6, main = "f.anox.a", las=1)
+polygon(d6, col = "red", border = "black")
 
-#pdf("abc.parameters.scatterplot.pdf", h=6, w=6)
+#dev.off()
+pdf("abc.parameters.scatterplot.pdf", h=6, w=6)
 par(mfrow=(c(2,2)), mar=c(4,4,1,1))
 plot(zz.2$f.anox.p~zz.2$D.anox, las=1, xlab="D.anox", ylab="f.anox.p")
 plot(zz.2$f.anox.p~zz.2$dur.p, las=1, xlab="dur.p", ylab="f.anox.p")
 plot(zz.2$D.anox~zz.2$dur.p, las=1, xlab="dur.p", ylab="D.anox")
+plot(zz.2$f.anox.a~zz.2$dur.p, las=1, xlab="dur.p", ylab="f.anox.a")
+
 #dev.off()
 
 ### PLOT OUTPUT OF MODEL RUNS THAT ARE INCLUDED AFTER EPSILON FILTER
 ## WILL SHOW UNCERTAINTY IN THE TIME HISTORY
 
 myvars <- rownames(zz.2)
+#myvars<-paste("X", myvars, sep = "")
 U.ocean.distance <- U.ocean[,myvars]
 U238.ocean.distance <- U238.ocean[,myvars]
 
@@ -322,7 +399,7 @@ for (i in 1:nreps) { lines(U.ocean[,i]~out[,1], cex=0.1, col=rgb(0, 0, 255, max 
 for (i in 1:ncol(U.ocean.distance)) { lines(U.ocean.distance[,i]~out[,1], cex=0.1, col=rgb(255, 255, 255, max = 255, alpha = 100))}
 
 plot(U238.ocean[,1]~out[,1], pch=1, cex=0.1, col="white", ylim=c(-2.5,0.2), las=1,
-     xlab="model years", ylab="d238U ocean")
+    xlab="model years", ylab="d238U ocean")
 for (i in 1:nreps) {lines(U238.ocean[,i]~out[,1], cex=0.1, col=rgb(0, 0, 255, max = 255, alpha = 30))}
 for (i in 1:ncol(U238.ocean.distance)) { lines(U238.ocean.distance[,i]~out[,1], cex=0.1, col=rgb(255, 255, 255, max = 255, alpha = 100))}
 
@@ -334,3 +411,13 @@ plot(U238.ocean.distance[,1]~out[,1], pch=1, cex=0.1, col="white", ylim=c(-2.5,0
      xlab="model years", ylab="d238U ocean")
 for (i in 1:ncol(U238.ocean.distance)) {lines(U238.ocean.distance[,i]~out[,1], cex=0.1, col=rgb(0, 0, 255, max = 255, alpha = 30))}
 #dev.off()
+
+par(mfrow=(c(1,1)))
+myvars <- rownames(zz.2)
+U238.ocean.distance <- U238.ocean[,myvars]
+plot(U238.ocean.distance[,1]~ StratTimes, pch=1, cex=0.1, col="white", xlim = rev(c(250750000,252250000)), ylim=c(-1.2,0.2), las=1,
+     xlab="model years", ylab="d238U ocean")
+for (i in 1:ncol(U238.ocean.distance)) {lines(U238.ocean.distance[,i]~StratTimes, cex=0.1, col=rgb(0, 0, 255, max = 255, alpha = 30))}
+points(FeiAge2,FeiUfrac2,col = "green",pch = 19)
+points(BoundaryAges,BoundaryUfrac,col = "red",pch = 19)
+
