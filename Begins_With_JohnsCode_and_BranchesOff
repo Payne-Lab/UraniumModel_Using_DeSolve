@@ -86,6 +86,7 @@ library(deSolve)
 ## how many iterations ##
 nreps <- 200
 
+
 # length of model run #
 duration <-1.8e6 #duration of model run
 
@@ -94,19 +95,24 @@ dt <- 1000 #time step
 t.anox.start <- 472000 #time of the onset of perturbation
 
 #set distributions for drawing values for parameters to be estimated
+perturbation <- seq(from = 0, to = 0.3, by = 0.002)  #Creates a vector of number from 0 to 0.3, incrementing by 0.002
+f.anox.p <- sample(perturbation, size = nreps, replace= TRUE) #anoxic seafloor fraction during perturbation, randomly pics a number from the previously made vector
+
+
 D.other <- runif(n=nreps, min = -0.05, max = -.02) #fractionation in oxygenated environments
-D.anox <- runif(n=nreps, min = 0.2, max = 1.2) #fractionation in anoxic environments
 f.anox.b <- runif(n=nreps, min = 0.002, max = 0.0021) #anoxic seafloor fraction before perturbation
-f.anox.p <- runif(n=nreps, min = 0.0, max = 0.3) #anoxic seafloor fraction during perturbation
+
+D.anox <- runif(n=nreps, min = 0.2, max = 1.2) #fractionation in anoxic environments
 dur.p <- runif(n=nreps, min = 0, max = duration-t.anox.start) #duration of perturbation
 f.anox.a <- runif(n=nreps, min = 0.002, max = 0.051) #anoxic seafloor fraction after perturbation
+
+
 
 #values to be used in setting up the model
 t.anox.end <- t.anox.start + dur.p #time of the end of the perturbation
 steps <- duration/dt #number of time steps in the model
 
 ##set up data frame to store output from the model
-U.ocean <- data.frame(matrix(nrow=steps+1, ncol=nreps)) #matrix of ocean uranium concentrations
 U238.ocean <- data.frame(matrix(nrow=steps+1, ncol=nreps)) #matrix of uranium isotope compositions
 params <- data.frame(matrix(nrow=nreps, ncol=6))
 names(params) <- c("D.other", "D.anox", "f.anox.b", "f.anox.p","dur.p", "f.anox.a")
@@ -114,15 +120,27 @@ names(params) <- c("D.other", "D.anox", "f.anox.b", "f.anox.p","dur.p", "f.anox.
 DU238.ocean <- data.frame(matrix(nrow=54, ncol=nreps))
 feifeiU238 <- data.frame(matrix(nrow=170, ncol=nreps))
 ##set up repetitions of model runs using for loop##
-y <- c(U = 1.96e13, #mol U (Morford and Emerson 1999)
-       U238 = -0.165) #Lau et al 2016
+
+times <- seq(0, duration, dt)
 
 parms <- c(J.riv = 0.4e8, #Lau et al 2016
            k.anox = 1.45772594752187e-4, #Lau et al 2016, calculated
            k.other = 1.73834440079269e-6, #Lau et al 2016, to reach steady state
            deltaU.riv=-0.05) #Lau et al 2016, calculated steady state input to produce d238U ~ -0.165
 
-times <- seq(0, duration, dt)
+y <- c(U = 1.96e13, #mol U (Morford and Emerson 1999)
+       U238 = -0.165) #Lau et al 2016
+
+
+
+#Adjust Model times, and find index of the times at our data points
+StratTimes <- 252300000 - times
+CompareIndex <- match(BoundaryAges,StratTimes)
+
+#Adjust Model times, and find index of the times at all of fei fei data points
+StratTimes <- 252300000 - times
+CompareFEIIndex <- match(FeiAge2,StratTimes)
+
 
 for (i in 1:nreps) {
   print(i)
@@ -146,52 +164,31 @@ for (i in 1:nreps) {
   out <- data.frame(ode(y, times, model, parms))
   
   ## need to store output from the model and parameter values in a data frame
-  U.ocean[,i] <- log10(out[,2]) #put uranium concentrations from model into data frame
   U238.ocean[,i] <- out[,3] #put uranium isotopes from model into data frame
   
-  params[i,1] <- D.other[i] #store value for D.other, fractionation in oxic environments
   params[i,2] <- D.anox[i] #store value for D.anox, fractionation in anoxic environments
-  params[i,3] <- f.anox.b[i] #store value for f.anox.b, background anoxia level
   params[i,4] <- f.anox.p[i] #store value for f.anox.p, perturbation anoxia level
   params[i,5] <- dur.p[i] #store value for dur.p, duration of perturbation
   params[i,6] <- f.anox.a[i] #store value for f.anox.a, after anoxia level
   
-  #Adjust Model times, and find index of the times at our data points
-  StratTimes <- 252300000 - times
-  CompareIndex <- match(BoundaryAges,StratTimes)
+ 
+#put uranium isotopes from model into data fram but only the ones at the data times 
   
-  #Adjust Model times, and find index of the times at all of fei fei data points
-  StratTimes <- 252300000 - times
-  CompareFEIIndex <- match(FeiAge2,StratTimes)
-  
-  #index into model output to find UFrac at the indexed times
-  ModelUfrac <- out$U238[CompareIndex]
-  
-  #index into model output to find UFrac at Fei fei  indexed times
-  ModelALLUffrac <- out$U238[CompareFEIIndex]
-  
-  #put uranium isotopes from model into data fram but only the ones at the data times 
-  
-  DU238.ocean[,i] <- ModelUfrac  #put uranium isotopes from model into data frame
-  feifeiU238[,i] <- ModelALLUffrac  
+  DU238.ocean[,i] <- out$U238[CompareIndex] 
+  feifeiU238[,i] <- out$U238[CompareFEIIndex] 
 }
-
 
 #Add noise to the model 
 FirstDifKim <- diff(BoundaryUfrac, lag = 1 , differences = 1)
 
 FirstDifFei <- diff(FeiUfrac2, lag = 1, difference = 1)
 
+DU238.ocean <- DU238.ocean + matrix(data = rnorm(n=nrow(DU238.ocean)* ncol(DU238.ocean), mean =0,
+                                                sd = sd(FirstDifKim)), nrow = nrow(DU238.ocean), ncol = ncol(DU238.ocean))
+feifeiU238 <- feifeiU238 + matrix(data = rnorm(n=nrow(feifeiU238)* ncol(feifeiU238), mean =0,
+                                               sd = sd(FirstDifFei)), nrow = nrow(feifeiU238), ncol = ncol(feifeiU238))
 
-noiseKim <- matrix(data = rnorm(n=nrow(DU238.ocean)* ncol(DU238.ocean), mean =0,
-                                sd = sd(FirstDifKim)), nrow = nrow(DU238.ocean), ncol = ncol(DU238.ocean))
-noiseFei <- matrix(data = rnorm(n=nrow(feifeiU238)* ncol(feifeiU238), mean =0,
-                                sd = sd(FirstDifFei)), nrow = nrow(feifeiU238), ncol = ncol(feifeiU238))
 
-DU238.ocean <- DU238.ocean + noiseKim
-
-feifeiU238 <- feifeiU238 + noiseFei
-                   
 #put all model runs with matching times in justModelUfrac dataframe 
 
 DU238.ocean$mod.age <- BoundaryAges
@@ -210,7 +207,7 @@ modelAndreal[,(nreps +1)] <- feifeiU238$realdata
 kim = ModelAndReal
 
 fei = modelAndreal
-run = kim
+run = fei
 
 #standardize
 mod.ufrac <- as.matrix(run)
@@ -222,11 +219,6 @@ m.ufrac <- (mod.ufrac-mean(mod.ufrac))/sd(mod.ufrac)
 pca <- princomp(t(m.ufrac))
 
 PoV <- pca$sdev^2/sum(pca$sdev^2)
-
-par(mfrow=c(1,1))
-plot(100*PoV[PoV>0.01], pch=1, las=1, ylab="Percent Variance Explained",
-     xlab="Principal Component")
-lines(100*PoV[PoV>0.01])
 
 #dev.off()
 zz <- as.data.frame(pca$scores[,1:6])
@@ -242,74 +234,55 @@ zz.1 <- cbind(params, zz[1:nreps,])
 rbPal <- colorRampPalette(c('yellow', 'black'))
 
 #This adds a column of color values
-#based on the y values
-zz.1$Col.D.other <- rbPal(100)[as.numeric(cut(zz.1$D.other,breaks = 100))]
+# based on the y values
+
 zz.1$Col.D.anox <- rbPal(100)[as.numeric(cut(zz.1$D.anox,breaks = 100))]
-zz.1$Col.f.anox.b <- rbPal(100)[as.numeric(cut(zz.1$f.anox.b,breaks = 100))]
+
 zz.1$Col.f.anox.p <- rbPal(100)[as.numeric(cut(zz.1$f.anox.p,breaks = 100))]
 zz.1$Col.dur.p <- rbPal(100)[as.numeric(cut(zz.1$dur.p,breaks = 100))]
 zz.1$Col.distance <- rbPal(100)[as.numeric(cut(zz.1$distance, breaks = 100))]
 zz.1$Col.f.anox.a <- rbPal(100)[as.numeric(cut(zz.1$f.anox.a, breaks = 100))]
 
-cols <- list(zz.1$Col.D.other, zz.1$Col.D.anox, zz.1$Col.f.anox.b, zz.1$Col.f.anox.p, zz.1$Col.dur.p, zz.1$Col.distance)
-titles <- c("D.other", "D.anox", "f.anox.b", "f.anox.p", "dur.p", "distance")
-lim.lower <- c(min(params$D.other), min(params$D.anox), min(params$f.anox.b),
-               min(params$f.anox.p), min(params$dur.p),min(params$f.anox.a)/100000, min(zz.1$distance))
-lim.upper <- c(max(params$D.other), max(params$D.anox), max(params$f.anox.b),
+cols <- list(zz.1$Col..1$D.other, zz.1$Col.D.anox, zz.1$Col.f.anox.b, zz.1$Col.f.anox.p, zz.1$Col.dur.p,zz.1$f.anox.a, zz.1$Col.distance)
+titles <- c("D.anox", "f.anox.p", "dur.p", "f.anox.a", "distance")
+lim.lower <- c( min(params$D.anox),
+               min(params$f.anox.p), min(params$dur.p), min(params$f.anox.a)/100000, min(zz.1$distance))
+lim.upper <- c( max(params$D.anox),
                max(params$f.anox.p), max(params$dur.p), max(params$f.anox.a)/100000, max(zz.1$distance))
 
 ### get parameter values via approximate bayes computation ###
-hist(zz.1$f.anox.p)
-hist(zz.1$distance)
+
 dist <- min(zz.1$distance)
 #Write line, that finds the first percentile , whats the value at first percent
-firstPercent <- quantile(zz.1$dist, c(0.01))  
+firstPercent <- quantile(zz.1$dist, c(0.010))  
 #Subset of ZZ1 where distance is less than first percentile of dist
-zz.2 <- subset(zz.1, distance <= firstPercent & distance < dist + 3)
-hist(zz.2$distance)
-plot(zz.2$Comp.1~zz.2$f.anox.p)
-hist(zz.1$f.anox.p)
-hist(zz.2$f.anox.p)
+##zz.2 <- subset(zz.1, distance <= firstPercent & distance < dist + 3
+zz.2 <- subset(zz.1, distance <= firstPercent)
+
 d1 <- density(zz.2$f.anox.p)
-d2 <- density(zz.2$f.anox.b)
 d3 <- density(zz.2$D.anox)
-d4 <- density(zz.2$D.other)
 d5 <- density(zz.2$dur.p)
 d6 <- density(zz.2$f.anox.a)
 
 #pdf("abc.parameters.density.pdf", h=8, w=6)
-par(mfrow=(c(3,2)), mar=c(3,4,1,1))
-plot(d1, main="f.anox.p", las=1)
+par(mfrow=(c(2,2)), mar=c(3,4,1,1))
+plot(d1, main="f.anox.p", las=1, xlim = c(0.01, 1))
 polygon(d1, col="red", border="black")
-plot(d2, main="f.anox.b", las=1)
-polygon(d2, col="red", border="black")
+
 plot(d3, main="D.anox", las=1)
 polygon(d3, col="red", border="black")
-plot(d4, main="D.other", las=1)
-polygon(d4, col="red", border="black")
-plot(d5, main="dur.p", las=1)
+
+plot(d5, main="dur.p", las=1, xlim = c(-250000, 2000000))
 polygon(d5, col="red", border="black")
+
 plot(d6, main = "f.anox.a", las=1)
 polygon(d6, col = "red", border = "black")
 
-#dev.off()
-pdf("abc.parameters.scatterplot.pdf", h=6, w=6)
-par(mfrow=(c(2,2)), mar=c(4,4,1,1))
-plot(zz.2$f.anox.p~zz.2$D.anox, las=1, xlab="D.anox", ylab="f.anox.p")
-plot(zz.2$f.anox.p~zz.2$dur.p, las=1, xlab="dur.p", ylab="f.anox.p")
-plot(zz.2$D.anox~zz.2$dur.p, las=1, xlab="dur.p", ylab="D.anox")
-plot(zz.2$f.anox.a~zz.2$dur.p, las=1, xlab="dur.p", ylab="f.anox.a")
-
-#dev.off()
 
 ### PLOT OUTPUT OF MODEL RUNS THAT ARE INCLUDED AFTER EPSILON FILTER
 ## WILL SHOW UNCERTAINTY IN THE TIME HISTORY
 
-myvars <- rownames(zz.2)
-#myvars<-paste("X", myvars, sep = "")
-U.ocean.distance <- U.ocean[,myvars]
-U238.ocean.distance <- U238.ocean[,myvars]
-
+#StratTimes <- 252500000 - times
 
 par(mfrow=(c(1,1)))
 myvars <- rownames(zz.2)
@@ -319,3 +292,4 @@ plot(U238.ocean.distance[,1]~ StratTimes, pch=1, cex=0.1, col="white", xlim = re
 for (i in 1:ncol(U238.ocean.distance)) {lines(U238.ocean.distance[,i]~StratTimes, cex=0.1, col=rgb(0, 0, 255, max = 255, alpha = 30))}
 points(FeiAge2,FeiUfrac2,col = "green",pch = 19)
 points(BoundaryAges,BoundaryUfrac,col = "red",pch = 19)
+
